@@ -7,6 +7,8 @@ TEAM_NUMBER_SIDE_MAP = {2: "T", 3: "CT"}
 BOMB_SITE_MAP = {"A": 1, "B": 2}
 COLUMNS_TO_KEEP = [
     "demo_file",
+    "tick",
+    "round",
     "attacker_X",
     "attacker_Y",
     "attacker_Z",
@@ -16,7 +18,6 @@ COLUMNS_TO_KEEP = [
     "user_Z",
     "user_name",
     "weapon",
-    "round",
     "bomb_site",
     "is_bomb_planted",
     "round_time_left",
@@ -144,7 +145,7 @@ def ticks_between_rounds(parser: DemoParser) -> Tuple[pd.DataFrame, int]:
     )
     df_round_end = parser.parse_events(["round_end"], player=["last_place_name"])[0][1]
     df_round_start = df_round_start.groupby("round").agg({"tick": ["max"]})["tick"]
-    df_round_end["round"] = df_round_end["round"].astype(int) - 2
+    df_round_end["round"] = df_round_end["round"].astype(int) - 1
     df_round_end = df_round_end.loc[df_round_end["round"] > 0]
     df_round_end["start_tick"] = df_round_start["max"]
     df_round_end.rename(columns={"tick": "end_tick"}, inplace=True)
@@ -306,10 +307,8 @@ def parse_demo(demo_file: str) -> pd.DataFrame:
         right_on=["tick", "team_name"],
         how="left",
     )
-    df.rename(
-        columns={"alive_count": "user_alive_count"}, inplace=True
-    )  # We only consider alive teammates, but since the "user" is already dead, we don't need to subtract 1.
-    df.drop(["tick", "team_name"], axis=1, inplace=True)
+    df.rename(columns={"alive_count": "user_alive_count"}, inplace=True)
+    # df.drop(["tick", "team_name"], axis=1, inplace=True)
 
     df["is_t_attacker"] = (df["attacker_team_name"] == "T").astype(int)
 
@@ -363,3 +362,22 @@ def parse_multiple_demos(demo_folder_path: str, map=str) -> pd.DataFrame:
 
     print(f"Parsing complete. {len(all_demos)} demos parsed.")
     return pd.concat(all_demos, ignore_index=True)
+
+
+def save_parsed_data(df: pd.DataFrame, output_path: str) -> None:
+    """
+    Saves the parsed DataFrame to a CSV file.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The DataFrame containing the parsed information.
+    output_path : str
+        The path to save the CSV file.
+
+    Returns
+    -------
+    None
+    """
+    df.to_csv(output_path, index=False)
+    print(f"Parsed data saved to {output_path}")
