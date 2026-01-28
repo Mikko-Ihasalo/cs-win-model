@@ -5,7 +5,7 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from src.utils.data_preprocessing import (
+from src.utils.demo_preprocessing import (
     parse_demo,
     save_parsed_data,
 )
