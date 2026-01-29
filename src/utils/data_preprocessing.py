@@ -1,5 +1,5 @@
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 
 PISTOL_ROUND_MAP = {1: 1, 13: 1}
 
@@ -15,7 +15,9 @@ def encode_categorical_columns(
     df: pd.DataFrame, categorical_columns: list
 ) -> pd.DataFrame:
     """TODO"""
-
-    for col in categorical_columns:
-        df[col] = df[col].astype("category").cat.codes
-    return df
+    label_encoders = {}
+    for column in categorical_columns:
+        encoder = LabelEncoder()
+        df[column] = encoder.fit_transform(df[column])
+        label_encoders[column] = encoder
+    return df, label_encoders

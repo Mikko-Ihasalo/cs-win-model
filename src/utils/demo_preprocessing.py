@@ -270,7 +270,7 @@ def parse_demo(demo_file: str) -> pd.DataFrame:
     df = df.merge(df_round_end[["reason", "round", "winner"]], on=["round"], how="left")
 
     df = df.merge(df_bomb, on=["round"], how="left", suffixes=("_kill", "_bomb"))
-    df["is_bomb_planted"] = df["tick_bomb"] <= df["tick_kill"]
+    df["is_bomb_planted"] = (df["tick_bomb"] <= df["tick_kill"]).astype(int)
 
     df["round_time_left"] = df.apply(
         lambda row: (
