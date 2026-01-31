@@ -15,7 +15,7 @@ from typing import Tuple
 
 
 def train_lightgbm_model(
-    X: pd.DataFrame, y: pd.Series, params: dict = None
+    X: pd.DataFrame, y: pd.Series, params: dict = None, metric: str = "binary_logloss"
 ) -> lgb.LGBMClassifier:
     """Trains a LightGBM model with given data and parameters.
 
@@ -31,7 +31,7 @@ def train_lightgbm_model(
     if params is None:
         params = {
             "objective": "binary",
-            "metric": "auc",
+            "metric": metric,
             "boosting_type": "gbdt",
             "learning_rate": 0.1,
             "num_leaves": 31,
@@ -47,7 +47,11 @@ def train_lightgbm_model(
 
 
 def optimize_lightgbm_hyperparameters(
-    X: pd.DataFrame, y: pd.Series, parameter_space: dict = None, n_trials: int = 50
+    X: pd.DataFrame,
+    y: pd.Series,
+    parameter_space: dict = None,
+    n_trials: int = 50,
+    metric: str = "binary_logloss",
 ) -> dict:
     """Optimizes LightGBM hyperparameters using Optuna.
 
@@ -67,18 +71,21 @@ def optimize_lightgbm_hyperparameters(
 
         model = lgb.LGBMClassifier(**parameter_space(trial))
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        scores = cross_val_score(model, X, y, cv=cv, scoring="roc_auc")
+        scores = cross_val_score(model, X, y, cv=cv, scoring=metric)
 
         return scores.mean()
 
-    study = optuna.create_study(direction="maximize", sampler=TPESampler(seed=42))
+    study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
     study.optimize(objective, n_trials=n_trials)
 
     return study.best_params
 
 
 def evaluate_model(
-    model: lgb.LGBMClassifier, X_val: pd.DataFrame, y_val: pd.Series
+    model: lgb.LGBMClassifier,
+    X_val: pd.DataFrame,
+    y_val: pd.Series,
+    metric: str = "binary_logloss",
 ) -> dict:
     """Evaluates the model on validation data and returns performance metrics.
 
@@ -87,7 +94,7 @@ def evaluate_model(
         model (lgb.LGBMClassifier): Trained LightGBM model.
         X_val (pd.DataFrame): Validation feature data.
         y_val (pd.Series): Validation target labels.
-
+        metric (str, optional): Metric to use for evaluation. Defaults to "binary_logloss".
     Returns:
         dict: Dictionary containing evaluation metrics.
     """
@@ -112,6 +119,7 @@ def model_traininng_pipeline(
     y_val: pd.Series,
     parameter_space: dict,
     n_trials: int = 50,
+    metric: str = "binary_logloss",
 ) -> Tuple[lgb.LGBMClassifier, dict]:
     """Complete model training pipeline including hyperparameter optimization and evaluation.
 
@@ -127,10 +135,10 @@ def model_traininng_pipeline(
         Tuple[lgb.LGBMClassifier, dict]: Trained model and evaluation metrics.
     """
     best_params = optimize_lightgbm_hyperparameters(
-        X_train, y_train, parameter_space, n_trials
+        X_train, y_train, parameter_space, n_trials, metric
     )
 
-    model = train_lightgbm_model(X_train, y_train, best_params)
+    model = train_lightgbm_model(X_train, y_train, best_params, metric)
 
     evaluation_metrics = evaluate_model(model, X_val, y_val)
 
