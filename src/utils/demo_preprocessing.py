@@ -325,7 +325,7 @@ def parse_demo(demo_file: str) -> pd.DataFrame:
     return df
 
 
-def parse_multiple_demos(demo_folder_path: str, map=str) -> pd.DataFrame:
+def parse_multiple_demos(demo_folder_path: str) -> pd.DataFrame:
     """
     Parses multiple demo files in the specified folder and combines the results into a single DataFrame.
 
@@ -333,8 +333,6 @@ def parse_multiple_demos(demo_folder_path: str, map=str) -> pd.DataFrame:
     ----------
     demo_folder_path : str
         The path to the folder containing the demo files.
-    gamer_tag : str
-        The gamer tag of the player.
 
     Returns
     -------
@@ -347,14 +345,8 @@ def parse_multiple_demos(demo_folder_path: str, map=str) -> pd.DataFrame:
             demo_path = os.path.join(demo_folder_path, demo_file)
             parser = initialize_demo_parser(demo_path)
             server_info = parser.parse_header()
-            if server_info["map_name"] != map:
-                print(f"Skipping demo {i+1} : {demo_file} (map mismatch)")
-                continue
-            # if "FACEIT" not in server_info["server_name"]:
-            #    print(f"Skipping demo {i+1} : {demo_file} (not a FACEIT demo)")
-            #    continue
-            print(f"Parsing demo {i+1} : {demo_path}")
             demo_data = parse_demo(demo_path)
+            demo_data["map"] = server_info["map_name"]
             print(f"Demo  {i+1}  parsing complete.")
             all_demos.append(demo_data)
 
