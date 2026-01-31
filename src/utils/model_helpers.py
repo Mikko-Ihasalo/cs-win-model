@@ -3,205 +3,169 @@ import lightgbm as lgb
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 from tensorflow import keras
 from sklearn.metrics import roc_auc_score, f1_score, classification_report
-import numpy as np
 import optuna
 from optuna.samplers import TPESampler
 import os
 import joblib
 import json
+import matplotlib.pyplot as plt
+import numpy as np
 
 from typing import Tuple
 
 
-def optimize_lgm_hyper_parameters(
-    space: dict,
-    n_trials: int,
-    X_train: pd.DataFrame,
-    y_train: pd.Series,
-    metric: str = "auc",
-    cv_folds: int = 5,
-    seed: int = 42,
-):
-    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+def train_lightgbm_model(
+    X: pd.DataFrame, y: pd.Series, params: dict = None
+) -> lgb.LGBMClassifier:
+    """Trains a LightGBM model with given data and parameters.
 
-    def objective(trial):
+    ----------
+    Parameters:
+        X (pd.DataFrame): Feature data.
+        y (pd.Series): Target labels.
+        params (dict, optional): LightGBM parameters. Defaults to None.
+
+    Returns:
+        lgb.LGBMClassifier: Trained LightGBM model.
+    """
+    if params is None:
         params = {
-            "num_leaves": trial.suggest_int(
-                space["num_leaves"]["min"], space["num_leaves"]["max"]
-            ),
-            "max_depth": trial.suggest_int(
-                space["max_depth"]["min"], space["max_depth"]["max"]
-            ),
-            "learning_rate": trial.suggest_float(
-                space["learning_rate"]["min"], space["learning_rate"]["max"]
-            ),
-            "n_estimators": trial.suggest_int(
-                space["n_estimators"]["min"], space["n_estimators"]["max"]
-            ),
-            "min_split_gain": trial.suggest_float(
-                space["min_split_gain"]["min"], space["min_split_gain"]["max"]
-            ),
-            "min_child_samples": trial.suggest_int(
-                space["min_child_samples"]["min"], space["min_child_samples"]["max"]
-            ),
-            "subsample_freq": trial.suggest_int(
-                space["subsample_freq"]["min"], space["subsample_freq"]["max"]
-            ),
-            "subsample": trial.suggest_float(
-                space["subsample"]["min"], space["subsample"]["max"]
-            ),
-            "colsample_bytree": trial.suggest_float(
-                space["colsample_bytree"]["min"], space["colsample_bytree"]["max"]
-            ),
-            "lambda_l1": trial.suggest_float(
-                space["lambda_l1"]["min"], space["lambda_l1"]["max"]
-            ),
-            "lambda_l2": trial.suggest_float(
-                space["lambda_l2"]["min"], space["lambda_l2"]["max"]
-            ),
+            "objective": "binary",
+            "metric": "auc",
+            "boosting_type": "gbdt",
+            "learning_rate": 0.1,
+            "num_leaves": 31,
+            "max_depth": -1,
+            "n_estimators": 100,
+            "random_state": 42,
         }
 
-        model = lgb.LGBMClassifier(
-            num_leaves=params["num_leaves"],
-            max_depth=params["max_depth"],
-            learning_rate=params["learning_rate"],
-            n_estimators=params["n_estimators"],
-            min_split_gain=params["min_split_gain"],
-            min_child_samples=params["min_child_samples"],
-            subsample_freq=params["subsample_freq"],
-            subsample=params["subsample"],
-            colsample_bytree=params["colsample_bytree"],
-            lambda_l1=params["lambda_l1"],
-            lambda_l2=params["lambda_l2"],
-            random_state=seed,
-            n_jobs=-1,
-        )
+    model = lgb.LGBMClassifier(**params)
+    model.fit(X, y)
 
-        scoring = "roc_auc" if metric == "auc" else "f1"
-        X = X_train.drop(columns=["id"]) if "id" in X_train.columns else X_train
-        cv_scores = cross_val_score(
-            model, X, y_train, cv=skf, scoring=scoring, n_jobs=-1
-        )
+    return model
 
-        mean_score = cv_scores.mean()
-        print(
-            f"Params: {params}, CV {metric}: {mean_score:.4f} (+/- {cv_scores.std():.4f})"
-        )
-        return mean_score  # optuna maximizes by default
 
-    sampler = TPESampler(seed=seed)
-    study = optuna.create_study(sampler=sampler, direction="maximize")
+def optimize_lightgbm_hyperparameters(
+    X: pd.DataFrame, y: pd.Series, parameter_space: dict = None, n_trials: int = 50
+) -> dict:
+    """Optimizes LightGBM hyperparameters using Optuna.
+
+    ----------
+    Parameters:
+        X (pd.DataFrame): Feature data.
+        y (pd.Series): Target labels.
+        n_trials (int, optional): Number of optimization trials. Defaults to 50.
+
+    Returns:
+        dict: Best hyperparameters found by Optuna.
+    """
+    if parameter_space is None:
+        parameter_space = {}
+
+    def objective(trial):
+
+        model = lgb.LGBMClassifier(**parameter_space(trial))
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        scores = cross_val_score(model, X, y, cv=cv, scoring="roc_auc")
+
+        return scores.mean()
+
+    study = optuna.create_study(direction="maximize", sampler=TPESampler(seed=42))
     study.optimize(objective, n_trials=n_trials)
 
-    best_params = study.best_params
-    return best_params, study
+    return study.best_params
 
 
-def train_lgbm_model(
-    space: dict,
-    n_trials: int,
+def evaluate_model(
+    model: lgb.LGBMClassifier, X_val: pd.DataFrame, y_val: pd.Series
+) -> dict:
+    """Evaluates the model on validation data and returns performance metrics.
+
+    ----------
+    Parameters:
+        model (lgb.LGBMClassifier): Trained LightGBM model.
+        X_val (pd.DataFrame): Validation feature data.
+        y_val (pd.Series): Validation target labels.
+
+    Returns:
+        dict: Dictionary containing evaluation metrics.
+    """
+    y_pred = model.predict(X_val)
+    y_proba = model.predict_proba(X_val)[:, 1]
+
+    auc = roc_auc_score(y_val, y_proba)
+    f1 = f1_score(y_val, y_pred)
+    report = classification_report(y_val, y_pred, output_dict=True)
+
+    return {
+        "auc": auc,
+        "f1_score": f1,
+        "classification_report": report,
+    }
+
+
+def model_traininng_pipeline(
     X_train: pd.DataFrame,
     y_train: pd.Series,
-    X_validation: pd.DataFrame,
-    y_validation: pd.Series,
-    X_final: pd.DataFrame,
-    y_final: pd.Series,
-    metric: str = "auc",
-    cv_folds: int = 5,
-    seed: int = 42,
-) -> Tuple[lgb.LGBMClassifier, lgb.LGBMClassifier]:
-    best_params, trial = optimize_lgm_hyper_parameters(
-        space=space,
-        n_trials=n_trials,
-        X_train=X_train,
-        y_train=y_train,
-        metric=metric,
-        cv_folds=cv_folds,
+    X_val: pd.DataFrame,
+    y_val: pd.Series,
+    parameter_space: dict,
+    n_trials: int = 50,
+) -> Tuple[lgb.LGBMClassifier, dict]:
+    """Complete model training pipeline including hyperparameter optimization and evaluation.
+
+    ----------
+    Parameters:
+        X_train (pd.DataFrame): Training feature data.
+        y_train (pd.Series): Training target labels.
+        X_val (pd.DataFrame): Validation feature data.
+        y_val (pd.Series): Validation target labels.
+        n_trials (int, optional): Number of optimization trials. Defaults to 50.
+
+    Returns:
+        Tuple[lgb.LGBMClassifier, dict]: Trained model and evaluation metrics.
+    """
+    best_params = optimize_lightgbm_hyperparameters(
+        X_train, y_train, parameter_space, n_trials
     )
 
-    def build_from_params(p):
-        return lgb.LGBMClassifier(
-            num_leaves=int(p["num_leaves"]),
-            max_depth=int(p["max_depth"]),
-            learning_rate=float(p["learning_rate"]),
-            n_estimators=int(p["n_estimators"]),
-            min_split_gain=float(p["min_split_gain"]),
-            min_child_samples=int(p["min_child_samples"]),
-            subsample_freq=int(p["subsample_freq"]),
-            subsample=float(p["subsample"]),
-            colsample_bytree=float(p["colsample_bytree"]),
-            lambda_l1=float(p["lambda_l1"]),
-            lambda_l2=float(p["lambda_l2"]),
-            random_state=seed,
-            n_jobs=-1,
-        )
+    model = train_lightgbm_model(X_train, y_train, best_params)
 
-    model = build_from_params(best_params)
+    evaluation_metrics = evaluate_model(model, X_val, y_val)
 
-    Xtr = X_train.drop(columns=["id"]) if "id" in X_train.columns else X_train
-    Xval = (
-        X_validation.drop(columns=["id"])
-        if "id" in X_validation.columns
-        else X_validation
-    )
-
-    model.fit(
-        Xtr,
-        y_train,
-        eval_set=[(Xval, y_validation)],
-        eval_metric=metric,
-    )
-
-    predictions = model.predict(Xval)
-    report = classification_report(y_validation, predictions)
-    print(report)
-
-    # ensure reports and models directories
-    os.makedirs("../reports", exist_ok=True)
-    os.makedirs("../models", exist_ok=True)
-
-    report_save_path = (
-        f"../reports/classification_report_{len(os.listdir('../reports/')) + 1}.json"
-    )
-    report_dict = classification_report(y_validation, predictions, output_dict=True)
-    with open(report_save_path, "w") as fh:
-        json.dump(report_dict, fh, indent=2)
-
-    final_model = build_from_params(best_params)
-    Xfinal = X_final.drop(columns=["id"]) if "id" in X_final.columns else X_final
-    final_model.fit(
-        Xfinal,
-        y_final,
-        eval_metric=metric,
-    )
-
-    model_path = f"../models/lgbm_final_{len(os.listdir('../models')) + 1}.joblib"
-    joblib.dump(final_model, model_path)
-
-    return model, final_model, best_params, trial
+    return model, evaluation_metrics
 
 
-def train_tensorflow_model(
-    X_train: pd.DataFrame, y_train: pd.Series
-) -> keras.Sequential:
-    model = keras.Sequential(
-        [
-            keras.layers.Dense(
-                64, activation="relu", input_shape=(X_train.shape[1] - 1,)
-            ),
-            keras.layers.Dense(32, activation="relu"),
-            keras.layers.Dense(1, activation="sigmoid"),
-        ]
-    )
-    model.compile(
-        optimizer="adam", loss="binary_crossentropy", metrics=["AUC", "Accuracy"]
-    )
-    model.fit(
-        X_train.drop(columns=["id"]),
-        y_train,
-        epochs=50,
-        batch_size=32,
-        validation_split=0.2,
-        verbose=1,
-    )
-    return model
+def visualize_feature_importance(
+    model: lgb.LGBMClassifier, feature_names: list, top_n: int = 20
+) -> None:
+    """Visualizes the top N feature importances of the model.
+
+    ----------
+    Parameters:
+        model (lgb.LGBMClassifier): Trained LightGBM model.
+        feature_names (list): List of feature names.
+        top_n (int, optional): Number of top features to display. Defaults to 20.
+    """
+
+    importances = model.feature_importances_
+    indices = np.argsort(importances)[-top_n:]
+
+    plt.figure(figsize=(10, 6))
+    plt.title("Feature Importances")
+    plt.barh(range(len(indices)), importances[indices], align="center")
+    plt.yticks(range(len(indices)), [feature_names[i] for i in indices])
+    plt.xlabel("Importance Score")
+    plt.show()
+
+
+def save_model(model: lgb.LGBMClassifier, model_path: str) -> None:
+    """Saves the trained model to the specified path.
+
+    ----------
+    Parameters:
+        model (lgb.LGBMClassifier): Trained LightGBM model.
+        model_path (str): Path to save the model.
+    """
+    joblib.dump(model, model_path)
