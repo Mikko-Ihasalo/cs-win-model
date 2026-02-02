@@ -40,7 +40,7 @@ def train_lightgbm_model(
             "random_state": 42,
         }
 
-    model = lgb.LGBMClassifier(objective="binary", **params)
+    model = lgb.LGBMClassifier(objective="binary", device="gpu", **params)
     model.fit(X, y)
 
     return model
@@ -73,8 +73,8 @@ def optimize_lightgbm_hyperparameters(
             params = parameter_space(trial)
         else:
             params = parameter_space
-        
-        model = lgb.LGBMClassifier(objective="binary", **params)
+
+        model = lgb.LGBMClassifier(objective="binary", device="gpu", **params)
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
         scores = cross_val_score(model, X, y, cv=cv, scoring=metric)
 
